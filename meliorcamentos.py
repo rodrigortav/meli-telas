@@ -95,7 +95,7 @@ def buscar_preco(largura, altura):
         return None
 
 # --- 4. INTERFACE ---
-st.title("🦟 Orçador Rápido V2")
+st.title("🦟 Orçador Mercado Livre")
 st.caption("Cole a pergunta do cliente abaixo:")
 
 pergunta = st.text_area("Mensagem do Cliente:", height=100, label_visibility="collapsed", placeholder="Ex: 2 telas de 60x60 e 4 de 100x120...")
@@ -114,38 +114,36 @@ if st.button("Gerar Resposta 🚀", type="primary", use_container_width=True):
             blocos_links = []
             total_geral = 0
             
-            # Loop agora recebe (QTD, LARGURA, ALTURA)
             for i, (qtd, l, a) in enumerate(itens):
                 preco_unitario = buscar_preco(l, a)
                 l_cm, a_cm = int(l*100), int(a*100)
-                num = i + 1
                 
                 if preco_unitario:
                     preco_total_item = preco_unitario * qtd
                     total_geral += preco_total_item
                     
-                    # Formatação inteligente da linha de orçamento
+                    # Formatação sem o "Tela 1, 2, 3..."
                     if qtd > 1:
-                        linhas_orcamento.append(f"• {qtd} x Tela {num} ({l_cm}cm x {a_cm}cm): R$ {preco_total_item:.2f} (R$ {preco_unitario:.2f} un)")
+                        linhas_orcamento.append(f"• {qtd} telas de {l_cm}cm x {a_cm}cm: R$ {preco_total_item:.2f} (R$ {preco_unitario:.2f} cada)")
                     else:
-                        linhas_orcamento.append(f"• Tela {num} ({l_cm}cm x {a_cm}cm): R$ {preco_unitario:.2f}")
+                        linhas_orcamento.append(f"• Tela {l_cm}cm x {a_cm}cm: R$ {preco_unitario:.2f}")
                     
                     link = LINKS_PRODUTO.get(preco_unitario, "Link indisponível")
                     
-                    blocos_links.append(
-                        f"\n🔴 PARA COMPRAR A TELA {num} ({l_cm}x{a_cm}):\n"
-                        f"ATENÇÃO!!! Adicione {qtd} UNIDADE(S) da variação de [R$ {preco_unitario:.2f}] no carrinho.\n"
-                        f"Link: {link}"
-                    )
+                    # Bloco de link também sem a numeração
+                    bloco = (f"\n🔴 LINK PARA MEDIDA {l_cm}x{a_cm}:\n"
+                             f"ATENÇÃO!!! Adicione {qtd} UNIDADE(S) da variação de [R$ {preco_unitario:.2f}] no carrinho.\n"
+                             f"Link: {link}")
+                    blocos_links.append(bloco)
                 else:
-                    linhas_orcamento.append(f"• {qtd} x Tela {num} ({l_cm}x{a_cm}): ⚠️ Excede envio")
+                    linhas_orcamento.append(f"• {qtd} telas de {l_cm}cm x {a_cm}cm: ⚠️ Medida excede limite de envio")
 
-            # Monta a resposta final
+            # Montagem da resposta final
             texto_final = (
                 f"{saudacao()}! Tudo bem?\n\n"
                 f"O valor total fica: R$ {total_geral:.2f}\n"
                 f"{chr(10).join(linhas_orcamento)}\n\n"
-                f"Caso tenha interesse, seguem os links:\n"
+                f"Caso tenha interesse, seguem os links para compra:\n"
                 f"{''.join(blocos_links)}\n\n"
                 f"Qualquer dúvida estou à disposição!"
             )
