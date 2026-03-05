@@ -39,47 +39,60 @@ def saudacao():
     else: return "Boa noite"
 
 def extrair_medidas_avancado(texto):
-    # 1. Normaliza separadores para dividir a frase em blocos lógicos
     texto = texto.lower()
-    # Troca ' e ' por um separador único, assim como quebras de linha
+    # Normalize separadores (' e ', quebra de linha)
     texto = re.sub(r'\s+e\s+', '|', texto)
-    texto = texto.replace('\n', '|').replace(',', '|')
+    texto = texto.replace('\n', '|')
+    # O PULO DO GATO: Só usa vírgula como separador se tiver um espaço DEPOIS dela.
+    # Assim, 140,50 não quebra, mas "140x100, 50x50" quebra.
+    texto = re.sub(r',\s+', '|', texto)
     
+    padrao_medida = r'(\d+[.,]?\d*)\s*[xX*]\s*(\d+[.,]?\d*)'
     blocos = texto.split('|')
     itens_encontrados = []
-    
-    # Regex para achar a medida (Largura x Altura)
-    padrao_medida = r'(\d+[.,]?\d*)\s*[xX*]\s*(\d+[.,]?\d*)'
     
     for bloco in blocos:
         bloco = bloco.strip()
         if not bloco: continue
         
-        # Procura se tem medida neste bloco
         match_medida = re.search(padrao_medida, bloco)
-        
         if match_medida:
             l_raw, a_raw = match_medida.groups()
             
-            # --- INTELIGÊNCIA DE QUANTIDADE ---
-            # Remove a medida encontrada do texto para não confundir com quantidade
-            # Ex: "2 telas de 60x60" -> remove "60x60" -> sobra "2 telas de "
+            # Textos para cálculo com ponto
+            l_str_math = l_raw.replace(',', '.')
+            a_str_math = a_raw.replace(',', '.')
+            
+            # Procura a quantidade
             texto_sem_medida = bloco.replace(match_medida.group(0), '')
-            
-            # Procura um número isolado no que sobrou do texto
             match_qtd = re.search(r'\b(\d+)\b', texto_sem_medida)
+            qtd = int(match_qtd.group(1)) if match_qtd else 1
             
-            qtd = 1
-            if match_qtd:
-                qtd = int(match_qtd.group(1))
+            l_calc = float(l_str_math)
+            a_calc = float(a_str_math)
             
-            # Converte medidas (cm -> m)
-            l = float(l_raw.replace(',', '.'))
-            a = float(a_raw.replace(',', '.'))
-            if l > 4: l /= 100
-            if a > 4: a /= 100
-            
-            itens_encontrados.append((qtd, l, a))
+            # --- INTELIGÊNCIA DE EXIBIÇÃO ---
+            # Se for > 4, consideramos que o cliente já digitou em centímetros (ex: 140,50)
+            if l_calc > 4:
+                l_show = l_raw # Mantém do jeito que o cliente digitou (com vírgula/ponto)
+                l_calc /= 100  # Converte o cálculo interno para metros
+            else:
+                # Se digitou em metros (ex: 1.2), converte o visual para cm redondinho (120)
+                l_show = str(int(l_calc * 100))
+                
+            if a_calc > 4:
+                a_show = a_raw
+                a_calc /= 100
+            else:
+                a_show = str(int(a_calc * 100))
+                
+            itens_encontrados.append({
+                'qtd': qtd, 
+                'l': l_calc, 
+                'a': a_calc, 
+                'l_show': l_show, 
+                'a_show': a_show
+            })
             
     return itens_encontrados
 
@@ -88,66 +101,74 @@ def buscar_preco(largura, altura):
     menor, maior = medidas[0], medidas[1]
     if menor > 1.50 or maior > 3.00: return None
     try:
-        col = df_precos.columns[df_precos.columns >= menor].min()
-        lin = df_precos.index[df_precos.index >= maior].min()
+        # Pega a primeira coluna/linha que seja MAIOR ou IGUAL à medida (Arredonda sempre pra cima na tabela)
+        col = df_precos.columns[df_precos.columns >= (menor - 0.0001)].min()
+        lin = df_precos.index[df_precos.index >= (maior - 0.0001)].min()
         return df_precos.loc[lin, col]
     except:
         return None
 
 # --- 4. INTERFACE ---
 st.title("🦟 Orçador Mercado Livre")
-st.caption("Cole a pergunta do cliente abaixo:")
 
-pergunta = st.text_area("Mensagem do Cliente:", height=100, label_visibility="collapsed", placeholder="Ex: 2 telas de 60x60 e 4 de 100x120...")
+if st.button("Limpar Tela"):
+    st.session_state.pergunta_input = ""
+
+pergunta = st.text_area("Cole a pergunta do cliente:", height=120, key="pergunta_input", placeholder="Ex: 1 tela 140,50x110,39...")
 
 if st.button("Gerar Resposta 🚀", type="primary", use_container_width=True):
     if not pergunta:
-        st.warning("Cole uma pergunta primeiro!")
+        st.warning("Cole a pergunta primeiro!")
     else:
-        # Usa a nova função de extração
         itens = extrair_medidas_avancado(pergunta)
         
         if not itens:
-            st.error("Não entendi as medidas. Tente separar por vírgula ou 'e'.")
+            st.error("Não entendi as medidas. Tente o formato: 140x120")
         else:
             linhas_orcamento = []
             blocos_links = []
             total_geral = 0
+            qtd_total_telas = sum(item['qtd'] for item in itens)
             
-            for i, (qtd, l, a) in enumerate(itens):
-                preco_unitario = buscar_preco(l, a)
-                l_cm, a_cm = int(l*100), int(a*100)
+            for item in itens:
+                preco_unit = buscar_preco(item['l'], item['a'])
+                l_show = item['l_show']
+                a_show = item['a_show']
+                qtd = item['qtd']
                 
-                if preco_unitario:
-                    preco_total_item = preco_unitario * qtd
+                if preco_unit:
+                    preco_total_item = preco_unit * qtd
                     total_geral += preco_total_item
                     
-                    # Formatação sem o "Tela 1, 2, 3..."
                     if qtd > 1:
-                        linhas_orcamento.append(f"• {qtd} telas de {l_cm}cm x {a_cm}cm: R$ {preco_total_item:.2f} (R$ {preco_unitario:.2f} cada)")
+                        linhas_orcamento.append(f"• {qtd} telas de {l_show}cm x {a_show}cm: R$ {preco_total_item:.2f} (R$ {preco_unit:.2f} cada)")
                     else:
-                        linhas_orcamento.append(f"• Tela {l_cm}cm x {a_cm}cm: R$ {preco_unitario:.2f}")
+                        linhas_orcamento.append(f"• Tela ({l_show}cm x {a_show}cm): R$ {preco_unit:.2f}")
                     
-                    link = LINKS_PRODUTO.get(preco_unitario, "Link indisponível")
+                    link = LINKS_PRODUTO.get(preco_unit, "Link indisponível")
                     
-                    # Bloco de link também sem a numeração
-                    bloco = (f"\n🔴 LINK PARA MEDIDA {l_cm}x{a_cm}:\n"
-                             f"ATENÇÃO!!! Adicione {qtd} UNIDADE(S) da variação de [R$ {preco_unitario:.2f}] no carrinho.\n"
-                             f"Link: {link}")
-                    blocos_links.append(bloco)
+                    blocos_links.append(
+                        f"\n🔴 LINK PARA MEDIDA {l_show}x{a_show}:\n"
+                        f"ATENÇÃO!!! Adicione {qtd} UNIDADE(S) da variação de [R$ {preco_unit:.2f}] no carrinho.\n"
+                        f"Link: {link}"
+                    )
                 else:
-                    linhas_orcamento.append(f"• {qtd} telas de {l_cm}cm x {a_cm}cm: ⚠️ Medida excede limite de envio")
+                    linhas_orcamento.append(f"• {qtd} telas de {l_show}cm x {a_show}cm: ⚠️ Medida excede limite de envio")
 
-            # Montagem da resposta final
+            # Montagem do Cabeçalho
+            if qtd_total_telas > 1:
+                cabecalho = f"O custo para a produção fica no total de R$ {total_geral:.2f}:\n"
+            else:
+                cabecalho = "" # Se for 1 tela, não repete o valor no topo.
+            
             texto_final = (
                 f"{saudacao()}! Tudo bem?\n\n"
-                f"O valor total fica: R$ {total_geral:.2f}\n"
+                f"{cabecalho}"
                 f"{chr(10).join(linhas_orcamento)}\n\n"
                 f"Caso tenha interesse, seguem os links para compra:\n"
                 f"{''.join(blocos_links)}\n\n"
-                f"Qualquer dúvida estou à disposição!"
+                f"(Após a compra vou te chamar pelo chat da compra para registrar a produção do seu pedido) Qualquer dúvida estou à disposição!Obrigada"
             )
             
-            st.success(f"Orçamento Gerado! Total: R$ {total_geral:.2f}")
-            st.markdown("**Copie a resposta abaixo:**")
+            st.success("Orçamento Gerado!")
             st.code(texto_final, language=None)
